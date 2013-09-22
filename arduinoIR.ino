@@ -9,30 +9,9 @@ int led = 13;
 // Pin 2 is for IR receiver
 int pinIRReceiver = 2;
 
-unsigned long time0 = -1;
-unsigned long timeFirstAcquisition = -1;
+int isOver;
 
-ZenArduinoIR zenArduinoIR;
-
-int acquisitionDone = -1;
-
-// if pin doesn't change during this period... the acquisition is considered over
-// 5 seconds here:
-#define ACQUISITION_TIMEOUT  (10 * 1000 * 1000) 
-
-// if a slice is less than this duration, it is considered
-// as a glitch and is ignored
-#define DELTA_MIN 250
-
-// last value read on IR pin
-int state = -1;
-
-// storage of times for each IR pin change of state
-#define NB_TIMES_SLICES 232
-long times[NB_TIMES_SLICES]; 
-
-// current slide being read
-int counter = 0;
+ZenArduinoIR zenArduinoIR(2, HIGH);
 
 // the setup routine runs once when you press reset:
 void setup() { 
@@ -42,26 +21,16 @@ void setup() {
   pinMode(led, OUTPUT);
   pinMode(pinIRReceiver, INPUT);
   
-  // initialize state of IR pin
-  state = digitalRead(pinIRReceiver);
-  time0 = micros();
+  isOver = -1;
   
-  // we store HIGH duration in 'even' indexed slots
-  if (state == HIGH) {
-    counter = 0;
-  } else {
-    times[0] = 0;
-    counter = 1;
+  if (zenArduinoIR.prepareAcquisition() < 0) {
+    msg("Arduino IR preparation failed!");
+    return;
   }
-  timeFirstAcquisition = -1;
-  // boolean to indicate that the acquisition was done
-  acquisitionDone = -1;
   
   // attach interrupt 0 (pin 2 for uno)
   // see: http://arduino.cc/en/Reference/attachInterrupt 
   attachInterrupt(0, interruptHandler, CHANGE);  
-  
-  zenArduinoIR.prepareAcquisition();
 }
 
 // the loop routine runs over and over again forever:
@@ -71,54 +40,22 @@ void loop() {
   digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
   delay(1000);               // wait for a second
   
-  if (acquisitionDone > 0) {
-    for(int i = 0 ; i < counter; i++) {
-        //Serial.print(i,DEC);
-        //Serial.print(":");
-        Serial.println(times[i],DEC);
+  if (isOver < 0) {
+    if (zenArduinoIR.isOver() > 0) {
+        isOver = 1;
+        msg("is OVER");
+        msgi("counter is:", zenArduinoIR.counter());
+        msgi("errno is:", zenArduinoIR.errno());
+        zenArduinoIR.dump();
+    } else {
+        msgi("... counter is:", zenArduinoIR.counter());
     }
-    Serial.println("DONE");
-    acquisitionDone = 0;
-  }
-  
-  if (acquisitionDone < 0) {
-      msgi("counter is:", counter);
   }
 }
 
 void interruptHandler()
 {
-  int val = digitalRead(pinIRReceiver);
-  unsigned long time = micros();
-  
-  // val should have changed but we test that anyway 
-  if (state != val) {
-    // we check against overflow
-    if (counter < NB_TIMES_SLICES) {
-      long delta = time - time0;
-      
-      // test if we have a glitch
-      if (delta < DELTA_MIN) {
-        delta = 0;
-      } 
-      times[counter] = delta;
-      
-      time0 = time;
-      counter++;
-    }
-    if (timeFirstAcquisition < 0) {
-      timeFirstAcquisition = time;
-    }
-  }
-  
-  if (acquisitionDone < 0) {
-    if (((time - timeFirstAcquisition) > ACQUISITION_TIMEOUT) && (counter > 10)) {
-      // we need at least 10 measurement to declare acquisition done
-      acquisitionDone = 1;
-    }
-  }
-  
-  state = val;
+  zenArduinoIR.interruptHandler();
 }
 
 void msg(char * msg) {
