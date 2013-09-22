@@ -1,4 +1,6 @@
 #include <ArduinoSerial.h>
+#include "ZenArduinoIR.h"
+
 
 // Pin 13 has an LED connected on most Arduino boards.
 // give it a name:
@@ -10,17 +12,23 @@ int pinIRReceiver = 2;
 unsigned long time0 = -1;
 unsigned long timeFirstAcquisition = -1;
 
+ZenArduinoIR zenArduinoIR;
+
 int acquisitionDone = -1;
 
 // if pin doesn't change during this period... the acquisition is considered over
 // 5 seconds here:
-#define ACQUISITION_TIMEOUT  (5 * 1000 * 1000) 
+#define ACQUISITION_TIMEOUT  (10 * 1000 * 1000) 
+
+// if a slice is less than this duration, it is considered
+// as a glitch and is ignored
+#define DELTA_MIN 250
 
 // last value read on IR pin
 int state = -1;
 
 // storage of times for each IR pin change of state
-#define NB_TIMES_SLICES 132
+#define NB_TIMES_SLICES 232
 long times[NB_TIMES_SLICES]; 
 
 // current slide being read
@@ -52,6 +60,8 @@ void setup() {
   // attach interrupt 0 (pin 2 for uno)
   // see: http://arduino.cc/en/Reference/attachInterrupt 
   attachInterrupt(0, interruptHandler, CHANGE);  
+  
+  zenArduinoIR.prepareAcquisition();
 }
 
 // the loop routine runs over and over again forever:
@@ -63,8 +73,8 @@ void loop() {
   
   if (acquisitionDone > 0) {
     for(int i = 0 ; i < counter; i++) {
-        Serial.print(i,DEC);
-        Serial.print(":");
+        //Serial.print(i,DEC);
+        //Serial.print(":");
         Serial.println(times[i],DEC);
     }
     Serial.println("DONE");
@@ -81,9 +91,18 @@ void interruptHandler()
   int val = digitalRead(pinIRReceiver);
   unsigned long time = micros();
   
+  // val should have changed but we test that anyway 
   if (state != val) {
+    // we check against overflow
     if (counter < NB_TIMES_SLICES) {
-      times[counter] = time - time0;
+      long delta = time - time0;
+      
+      // test if we have a glitch
+      if (delta < DELTA_MIN) {
+        delta = 0;
+      } 
+      times[counter] = delta;
+      
       time0 = time;
       counter++;
     }
